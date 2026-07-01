@@ -1,7 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from app.services.sql_agent import get_sql_agent
-
+from app.services.sql_agent import get_sql_query_chain
 
 router = APIRouter(prefix="/ai", tags=["Agente IA"])
 
@@ -10,14 +9,22 @@ class QueryRequest(BaseModel):
 
 @router.post("/ask")
 async def ask_agent(request: QueryRequest):
-    """
-    Envia una pregunta en lenguaje natural al agente SQL
-    """
     try:
-        agent = get_sql_agent()
-        # Invocamos al agente con la pregunta del usuario
-        response = agent.involke({"input": request.question})
-        return {"answer": response["output"]}
+        chain, db = get_sql_query_chain()
+        
+        # 1. Generar SQL
+        sql = chain.invoke({"question": request.question})
+        
+        # 2. Limpiar el SQL (por si el modelo incluye ```sql ... ```)
+        clean_sql = sql.replace("```sql", "").replace("```", "").strip()
+        
+        # 3. Ejecutar en la base de datos
+        result = db.run(clean_sql)
+        
+        return {
+            "question": request.question,
+            "sql_generated": clean_sql,
+            "answer": result
+        }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error en el agente: {str(e)}")
-
+        raise HTTPException(status_code=500, detail=str(e))
